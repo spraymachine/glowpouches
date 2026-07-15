@@ -256,8 +256,10 @@ const pucks = FLAVORS.map(f=>{
 });
 const lefts  = pucks.slice(0,3), rights = pucks.slice(3);
 
-/* em ranges over the three mg buttons: .55 (3mg) .. 3 (12mg) */
-function emLevel(v){ return (v - .55) / (3 - .55); }   // 0..1
+/* em ranges over the three mg buttons: .55 (3mg) .. 3 (12mg).
+   Output compressed to .12...88 so the lowest strength still glows
+   noticeably and the highest doesn't blow out. */
+function emLevel(v){ return .12 + ((v - .55) / (3 - .55)) * .76; }
 function coreOpacityFor(v){ return .4 + emLevel(v)*.6; }   // .4 .. 1
 function rimOpacityFor(v){ return .45 + emLevel(v)*.55; }  // .45 .. 1
 function coreScaleFor(v){ return .85 + emLevel(v)*.35; }   // .85 .. 1.2
