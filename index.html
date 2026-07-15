@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Glow — Immersive 3D</title>
 <style>
   :root{
@@ -10,7 +10,8 @@
     --ice:#4dc9ff; --ember:#ff6b4d; --rose:#ff4d9e;
   }
   *{margin:0;padding:0;box-sizing:border-box}
-  body{background:#000;color:#eaeaea;font-family:"Helvetica Neue",Arial,sans-serif;overflow-x:hidden}
+  body{background:#000;color:#eaeaea;font-family:"Helvetica Neue",Arial,sans-serif;overflow-x:hidden;
+      touch-action:pan-y} /* browser owns vertical scroll; horizontal drags reach the spin handler */
 
   #gl{position:fixed;inset:0;width:100%;height:100%;z-index:0}
 
@@ -32,20 +33,45 @@
   .strengths{display:flex;gap:12px;justify-content:center}
   .strengths button, .cta{background:#111a;border:1px solid #333;color:#ccc;border-radius:24px;
       padding:9px 20px;font-size:12px;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;
-      transition:.25s;backdrop-filter:blur(8px)}
-  .strengths button:hover,.cta:hover{border-color:var(--ac,var(--mint));color:#fff;
-      box-shadow:0 0 18px color-mix(in srgb,var(--ac,var(--mint)) 40%,transparent)}
+      transition:.25s;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  @media (hover:hover){
+    .strengths button:hover,.cta:hover{border-color:var(--ac,var(--mint));color:#fff;
+        box-shadow:0 0 18px color-mix(in srgb,var(--ac,var(--mint)) 40%,transparent)}
+  }
   .strengths button.on{background:color-mix(in srgb,var(--ac,var(--mint)) 16%,#111);border-color:var(--ac,var(--mint));color:#fff}
   .panel .cta{margin-top:18px;border-color:#444}
 
-  #logoEnd{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);text-align:center;opacity:0}
+  #logoEnd{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);text-align:center;opacity:0;
+      width:max-content;max-width:94vw}
   #logoEnd .word{font-size:clamp(44px,6vw,84px);font-weight:200;letter-spacing:.34em;color:#fff;
       text-shadow:0 0 20px var(--mint),0 0 60px var(--mint)}
   #logoEnd .cta{pointer-events:auto;margin-top:34px;padding:13px 34px;backdrop-filter:none}
 
-  .hint{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);font-size:11px;color:#555;
+  .hint{position:absolute;bottom:calc(26px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
+      font-size:11px;color:#555;
       letter-spacing:.25em;text-transform:uppercase;animation:hb 2.2s ease-in-out infinite}
   @keyframes hb{0%,100%{opacity:.4}50%{opacity:1}}
+
+  /* ---- mobile: re-fit type, spacing, touch targets ---- */
+  @media (max-width:640px){
+    h1#headline{font-size:clamp(28px,9vw,92px);top:33%}
+    .panel{top:67%;width:min(560px,92vw)}
+    .panel .setname{font-size:11px;letter-spacing:.2em;margin-bottom:14px}
+    .strengths{gap:10px}
+    .strengths button, .cta{padding:13px 18px;font-size:13px;min-height:44px}
+    .panel .cta{margin-top:16px;min-width:62%}
+    #logoEnd .word{letter-spacing:.28em}
+    #logoEnd .cta{padding:15px 32px}
+    .hint{bottom:calc(16px + env(safe-area-inset-bottom))}
+  }
+  /* phones in landscape: short viewport, pull UI tighter */
+  @media (max-height:480px){
+    h1#headline{top:38%}
+    .panel{top:64%}
+    .panel .setname{margin-bottom:10px}
+    .panel .cta{margin-top:10px}
+    #logoEnd .cta{margin-top:18px}
+  }
 </style>
 <script type="importmap">
 {
@@ -98,16 +124,30 @@ import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
+const COARSE = matchMedia('(pointer:coarse)').matches;
+ScrollTrigger.config({ignoreMobileResize:true});      // don't re-layout on URL-bar show/hide
+if(COARSE) ScrollTrigger.normalizeScroll(true);        // stable scrub + snap on touch
+
 /* ================= renderer / scene ================= */
 const canvas = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, COARSE ? 1.5 : 2)); // bloom is costly on phone GPUs
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(0x000000, 0.055);
 
 const camera = new THREE.PerspectiveCamera(38, 1, .1, 100);
 const camState = {x:0, y:1.1, z:11, tx:0, ty:0, tz:0};   // position + lookAt target, gsap-driven
+
+/* portrait re-framing: widen fov a little, pull the camera back the rest of the way,
+   and thin the fog so perceived depth-dimming matches desktop (density*z stays equal) */
+function fitFov(){
+  camera.fov = camera.aspect < 1 ? Math.min(58, 38/Math.pow(camera.aspect, .72)) : 38;
+}
+function zScale(){
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov/2));
+  return Math.max(1, 2.4/(6.6*tanHalf*camera.aspect)); // parked view must fit a 3-puck row
+}
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -116,18 +156,22 @@ composer.addPass(bloom);
 
 function resize(){
   const w = innerWidth, h = innerHeight;
+  if(!w || !h) return;               // hidden pane / zero-size viewport: keep last sane state
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
   camera.aspect = w/h;
+  fitFov();
   camera.updateProjectionMatrix();
+  scene.fog.density = 0.055 / zScale();
 }
 addEventListener('resize', ()=>{
   resize();
   STACK_X = stackX();
-  // re-seat stacks only while still in the rest state
+  // re-seat stacks + camera only while still in the rest state
   if(tl && tl.scrollTrigger && tl.scrollTrigger.progress < .02){
     lefts.forEach(g=>g.position.x = -STACK_X);
     rights.forEach(g=>g.position.x = STACK_X);
+    camState.z = 11*zScale();
   }
 });
 resize();
@@ -164,18 +208,22 @@ const FLAVORS = [
   {n:'rose',   c:0xff4d9e, side:'R', row:2},
 ];
 const ROW_Y = [1.55, .2, -1.15];
-/* center-row slot spacing, kept inside frame at the parked camera distance (z≈6.6) */
+/* center-row slot spacing, kept inside frame at the parked camera distance (z≈6.6*zScale) */
 function slotX(i){
-  const visHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov/2)) * 6.6 * camera.aspect;
-  const s = Math.min(2.1, Math.max(1.15, visHalf - .95));
+  const visHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov/2)) * 6.6*zScale() * camera.aspect;
+  const s = Math.min(2.1, Math.max(1.3, visHalf - .95));
   return [-s, 0, s][i];
 }
-/* keep edge stacks inside the camera frustum at rest (camera z=11, pucks z=0) */
+/* edge stacks: inside the frustum at rest (camera z=11*zScale) but OUTSIDE the parked
+   frame (z=6.6*zScale), so the idle set never photobombs the assembled row */
 function stackX(){
-  const visHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov/2)) * 11 * camera.aspect;
-  return Math.min(6.4, Math.max(2.35, visHalf - 1.45)); // keep puck + parallax drift inside frame
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov/2));
+  const restVis   = tanHalf * 11*zScale()  * camera.aspect;
+  const parkedVis = tanHalf * 6.6*zScale() * camera.aspect;
+  return Math.min(6.4, Math.max(parkedVis + .9, restVis - 1.45));
 }
 let STACK_X = stackX();
+camState.z = 11*zScale();   // seat the rest camera for the current aspect
 
 const puckGeo = new THREE.CylinderGeometry(.62, .62, .3, 48, 1);
 const rimGeo  = new THREE.TorusGeometry(.62, .035, 12, 48);
@@ -264,7 +312,7 @@ tl.addLabel('rest')
   .to({}, {duration:.4})
   .addLabel('assembleStart')
   .to(headline, {opacity:0, y:-80, scale:.85, duration:1.1, ease:'power2.inOut'}, 'assembleStart')
-  .to(camState, {z:8.2, y:.75, duration:2.4, ease:'power1.inOut'}, 'assembleStart');
+  .to(camState, {z:()=>8.2*zScale(), y:.75, duration:2.4, ease:'power1.inOut'}, 'assembleStart');
 
 /* phase A: left stack -> center row. flight = arc toward camera + spin */
 lefts.forEach((g,i)=>{
@@ -277,11 +325,11 @@ lefts.forEach((g,i)=>{
 
 tl.addLabel('setA', '>.15')
   .to('#panelA', {autoAlpha:1, y:0, duration:.35, ease:'power2.out'}, 'setA-=.2')
-  .to(camState, {z:6.6, y:.45, ty:.1, duration:1.2, ease:'power1.inOut'}, 'setA-=.6')
+  .to(camState, {z:()=>6.6*zScale(), y:.45, ty:.1, duration:1.2, ease:'power1.inOut'}, 'setA-=1.2') // parked by the snap point
   .to({}, {duration:1.15})
   .addLabel('handoffStart')
   .to('#panelA', {autoAlpha:0, y:-18, duration:.3, ease:'power2.in'}, 'handoffStart')
-  .to(camState, {x:1.6, z:7.4, duration:2.2, ease:'power1.inOut'}, 'handoffStart');  // lateral drift during swap
+  .to(camState, {x:1.6, z:()=>7.4*zScale(), duration:2.2, ease:'power1.inOut'}, 'handoffStart');  // lateral drift during swap
 
 /* crossover: lefts exit far left w/ spin+fade, rights sweep in */
 lefts.forEach((g,i)=>{
@@ -302,11 +350,11 @@ rights.forEach((g,i)=>{
 
 tl.addLabel('setB', '>.15')
   .to('#panelB', {autoAlpha:1, y:0, duration:.35, ease:'power2.out'}, 'setB-=.2')
-  .to(camState, {x:0, z:6.6, duration:1, ease:'power1.inOut'}, 'setB-=.5')
+  .to(camState, {x:0, z:()=>6.6*zScale(), duration:1, ease:'power1.inOut'}, 'setB-=1') // parked by the snap point
   .to({}, {duration:1.15})
   .addLabel('finaleStart')
   .to('#panelB', {autoAlpha:0, y:-18, duration:.3, ease:'power2.in'}, 'finaleStart')
-  .to(camState, {z:10.5, y:1.6, ty:.2, duration:2.6, ease:'power1.inOut'}, 'finaleStart');
+  .to(camState, {z:()=>10.5*zScale(), y:1.6, ty:.2, duration:2.6, ease:'power1.inOut'}, 'finaleStart');
 
 /* finale: all six form a slow ring, then collapse to core */
 pucks.forEach((g,i)=>{
@@ -352,17 +400,19 @@ pucks.forEach(g=>{
   g.userData.rim.scale.setScalar(coreScaleFor(g.userData.em));
 });
 
-/* pointer parallax */
+/* pointer parallax — mouse only; on touch every scroll-drag would yank the camera */
 const par = {x:0, y:0};
 addEventListener('pointermove', e=>{
+  if(e.pointerType!=='mouse') return;
   par.x = (e.clientX/innerWidth - .5);
   par.y = (e.clientY/innerHeight - .5);
 });
 
-/* drag to spin the parked row */
+/* drag to spin the parked row (touch-action:pan-y hands horizontal drags to us) */
 let dragging = false, lastX = 0, spinVel = 0;
 addEventListener('pointerdown', e=>{ if(e.target.tagName!=='BUTTON'){ dragging=true; lastX=e.clientX; }});
-addEventListener('pointerup',   ()=> dragging=false);
+addEventListener('pointerup',     ()=> dragging=false);
+addEventListener('pointercancel', ()=> dragging=false);  // browser claimed the gesture for scrolling
 addEventListener('pointermove', e=>{ if(dragging){ spinVel += (e.clientX-lastX)*.0018; lastX=e.clientX; }});
 
 /* ================= render loop ================= */
