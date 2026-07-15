@@ -131,7 +131,11 @@ if(COARSE) ScrollTrigger.normalizeScroll(true);        // stable scrub + snap on
 /* ================= renderer / scene ================= */
 const canvas = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio, COARSE ? 1.5 : 2)); // bloom is costly on phone GPUs
+/* adaptive resolution: start at full sharpness, step down only if the GPU proves it can't keep up */
+const DPR_MAX = Math.min(devicePixelRatio, 2);
+const DPR_MIN = Math.min(DPR_MAX, 1.25);
+let dpr = DPR_MAX, dynMax = DPR_MAX;
+renderer.setPixelRatio(dpr);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(0x000000, 0.055);
@@ -149,7 +153,9 @@ function zScale(){
   return Math.max(1, 2.4/(6.6*tanHalf*camera.aspect)); // parked view must fit a 3-puck row
 }
 
-const composer = new EffectComposer(renderer);
+/* composer bypasses the canvas's built-in AA — give its target MSAA (near-free on mobile tilers) */
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {
+  type: THREE.HalfFloatType, samples: 4}));
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(1,1), 1.15, .65, .12);
 composer.addPass(bloom);
@@ -225,8 +231,8 @@ function stackX(){
 let STACK_X = stackX();
 camState.z = 11*zScale();   // seat the rest camera for the current aspect
 
-const puckGeo = new THREE.CylinderGeometry(.62, .62, .3, 48, 1);
-const rimGeo  = new THREE.TorusGeometry(.62, .035, 12, 48);
+const puckGeo = new THREE.CylinderGeometry(.62, .62, .3, 96, 1);
+const rimGeo  = new THREE.TorusGeometry(.62, .035, 16, 96);
 
 const pucks = FLAVORS.map(f=>{
   const g = new THREE.Group();
@@ -234,7 +240,7 @@ const pucks = FLAVORS.map(f=>{
     color:0x0e0e0e, roughness:.28, metalness:.6, clearcoat:.8, clearcoatRoughness:.25,
     transparent:true}));
   const core = new THREE.Mesh(
-    new THREE.CylinderGeometry(.4,.4,.31,48),
+    new THREE.CylinderGeometry(.4,.4,.31,96),
     new THREE.MeshBasicMaterial({color:f.c, transparent:true, opacity:.95}));
   const rim = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({color:f.c, transparent:true, opacity:.8}));
   rim.rotation.x = Math.PI/2;
@@ -418,8 +424,31 @@ addEventListener('pointermove', e=>{ if(dragging){ spinVel += (e.clientX-lastX)*
 /* ================= render loop ================= */
 const clock = new THREE.Clock();
 const smooth = {x:0, y:0};
+
+/* resolution governor: ~1.5s windows; two slow windows in a row -> step down (and never
+   climb back to a level that failed); sustained vsync-locked window -> step back up */
+let lastT = 0;
+const perf = {acc:0, n:0, bad:0, cool:2};
+function setDpr(v){ dpr = v; renderer.setPixelRatio(dpr); resize(); }
+function govern(dt){
+  if(dt <= 0 || dt > .25) return;            // tab-hidden gap, ignore
+  perf.acc += dt; perf.n++;
+  if(perf.n < 90) return;
+  const avg = perf.acc/perf.n;
+  perf.acc = 0; perf.n = 0;
+  perf.bad = avg > .024 ? perf.bad+1 : 0;
+  if(perf.cool > 0){ perf.cool--; return; }
+  if(perf.bad >= 2 && dpr > DPR_MIN){
+    if(dpr === dynMax) dynMax = Math.max(DPR_MIN, dpr - .25);
+    setDpr(Math.max(DPR_MIN, dpr - .25)); perf.bad = 0; perf.cool = 2;
+  }else if(avg < .017 && dpr < dynMax){
+    setDpr(Math.min(dynMax, dpr + .25)); perf.cool = 4;
+  }
+}
+
 function tick(){
   const t = clock.getElapsedTime();
+  govern(t - lastT); lastT = t;
   smooth.x += (par.x - smooth.x)*.05;
   smooth.y += (par.y - smooth.y)*.05;
 
@@ -452,7 +481,7 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 /* debug handle (harmless in production) */
-window.__glow = {scene, camera, pucks, tl, get stackX(){return STACK_X}, camState};
+window.__glow = {scene, camera, pucks, tl, get stackX(){return STACK_X}, get dpr(){return dpr}, camState};
 </script>
 </body>
 </html>
