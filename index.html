@@ -49,8 +49,6 @@
 
   /* ritual chapter: corner steps (revealed by the timeline after the finale) */
   .rstep{position:absolute;max-width:42vw;--sc:var(--mint);opacity:0}
-  .rstep .num{position:relative;display:inline-block;font-size:clamp(10px,1.2vw,13px);
-      letter-spacing:.3em;color:var(--sc);text-shadow:0 0 8px var(--sc);margin-bottom:8px}
   .rstep h2{font-size:clamp(15px,1.8vw,24px);font-weight:500;letter-spacing:.02em;color:#fff;margin:0}
   .rstep .gh{position:absolute;left:0;bottom:0;width:100%;font-size:clamp(15px,1.8vw,24px);
       font-weight:500;letter-spacing:.02em;opacity:0;pointer-events:none}
@@ -58,10 +56,10 @@
   .rstep .gm{color:#f0f}
   .rstep .ring{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;
       border:1px solid var(--sc);border-radius:50%;opacity:0}
-  .rstep.tl{top:calc(24px + env(safe-area-inset-top));left:calc(24px + env(safe-area-inset-left))}
-  .rstep.tr{top:calc(24px + env(safe-area-inset-top));right:calc(24px + env(safe-area-inset-right));text-align:right}
-  .rstep.bl{bottom:calc(24px + env(safe-area-inset-bottom));left:calc(24px + env(safe-area-inset-left))}
-  .rstep.br{bottom:calc(24px + env(safe-area-inset-bottom));right:calc(24px + env(safe-area-inset-right));text-align:right}
+  .rstep.tl{top:calc(clamp(36px,9vh,110px) + env(safe-area-inset-top));left:calc(clamp(36px,7vw,120px) + env(safe-area-inset-left))}
+  .rstep.tr{top:calc(clamp(36px,9vh,110px) + env(safe-area-inset-top));right:calc(clamp(36px,7vw,120px) + env(safe-area-inset-right));text-align:right}
+  .rstep.bl{bottom:calc(clamp(36px,9vh,110px) + env(safe-area-inset-bottom));left:calc(clamp(36px,7vw,120px) + env(safe-area-inset-left))}
+  .rstep.br{bottom:calc(clamp(36px,9vh,110px) + env(safe-area-inset-bottom));right:calc(clamp(36px,7vw,120px) + env(safe-area-inset-right));text-align:right}
 
   .hint{position:absolute;bottom:calc(26px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
       font-size:11px;color:#555;
@@ -79,11 +77,6 @@
     #logoEnd .word{letter-spacing:.18em;font-size:clamp(26px,7.5vw,44px)}
     .rstep{max-width:44vw}
     .rstep h2,.rstep .gh{font-size:13px}
-    .rstep .num{margin-bottom:5px}
-    .rstep.tl,.rstep.bl{left:calc(16px + env(safe-area-inset-left))}
-    .rstep.tr,.rstep.br{right:calc(16px + env(safe-area-inset-right))}
-    .rstep.tl,.rstep.tr{top:calc(16px + env(safe-area-inset-top))}
-    .rstep.bl,.rstep.br{bottom:calc(16px + env(safe-area-inset-bottom))}
     #logoEnd .cta{padding:15px 32px}
     .hint{bottom:calc(16px + env(safe-area-inset-bottom))}
   }
@@ -135,28 +128,28 @@
   </div>
 
   <div class="rstep tl" id="rs1" style="--sc:var(--mint)">
-    <div class="num">01<span class="ring"></span></div>
+    <span class="ring"></span>
     <h2>Pick flavour &amp; strength</h2>
     <span class="gh gc" aria-hidden="true">Pick flavour &amp; strength</span>
     <span class="gh gm" aria-hidden="true">Pick flavour &amp; strength</span>
   </div>
 
   <div class="rstep tr" id="rs2" style="--sc:var(--citrus)">
-    <div class="num">02<span class="ring"></span></div>
+    <span class="ring"></span>
     <h2>Tuck it under your lip</h2>
     <span class="gh gc" aria-hidden="true">Tuck it under your lip</span>
     <span class="gh gm" aria-hidden="true">Tuck it under your lip</span>
   </div>
 
   <div class="rstep bl" id="rs3" style="--sc:var(--ice)">
-    <div class="num">03<span class="ring"></span></div>
+    <span class="ring"></span>
     <h2>Feel the slow release</h2>
     <span class="gh gc" aria-hidden="true">Feel the slow release</span>
     <span class="gh gm" aria-hidden="true">Feel the slow release</span>
   </div>
 
   <div class="rstep br" id="rs4" style="--sc:var(--rose)">
-    <div class="num">04<span class="ring"></span></div>
+    <span class="ring"></span>
     <h2>Bin it &amp; go</h2>
     <span class="gh gc" aria-hidden="true">Bin it &amp; go</span>
     <span class="gh gm" aria-hidden="true">Bin it &amp; go</span>
