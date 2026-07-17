@@ -61,20 +61,32 @@
   .rstep.bl{bottom:calc(clamp(36px,9vh,110px) + env(safe-area-inset-bottom));left:calc(clamp(36px,7vw,120px) + env(safe-area-inset-left))}
   .rstep.br{bottom:calc(clamp(36px,9vh,110px) + env(safe-area-inset-bottom));right:calc(clamp(36px,7vw,120px) + env(safe-area-inset-right));text-align:right}
 
-  /* contact chapter (final scroll tick) */
+  /* contact chapter (final scroll tick): interactive neon form */
   #contact{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;opacity:0;
-      width:max-content;max-width:94vw}
+      width:min(560px,92vw);--ac:var(--mint);pointer-events:auto}
   #contact .lbl{font-size:12px;letter-spacing:.4em;text-transform:uppercase;color:#8fa;
-      text-shadow:0 0 10px var(--mint);margin-bottom:22px}
-  #contact .mail{display:inline-block;font-size:clamp(22px,3.4vw,46px);font-weight:200;letter-spacing:.06em;
-      color:#fff;text-decoration:none;pointer-events:auto;
-      text-shadow:0 0 14px var(--mint),0 0 44px var(--mint);transition:.25s}
+      text-shadow:0 0 10px var(--mint);margin-bottom:6px}
+  .f-row{display:flex;gap:26px;justify-content:center;margin-top:24px}
+  .f-field{position:relative;text-align:left;flex:1}
+  .f-field label{display:block;font-size:10px;letter-spacing:.3em;text-transform:uppercase;
+      color:#7e8a84;margin-bottom:8px;transition:.25s}
+  .f-field input,.f-field textarea{display:block;width:100%;background:transparent;border:none;
+      border-bottom:1px solid #263129;color:#fff;font-size:15px;font-weight:300;letter-spacing:.03em;
+      padding:6px 2px 10px;outline:none;font-family:inherit;caret-color:var(--fc,var(--mint));
+      transition:border-color .25s, box-shadow .25s;border-radius:0}
+  .f-field textarea{resize:none;min-height:58px}
+  .f-field input:focus,.f-field textarea:focus{border-color:var(--fc,var(--mint));
+      box-shadow:0 14px 20px -14px var(--fc,var(--mint))}
+  .f-field.lit label{color:var(--fc);text-shadow:0 0 8px var(--fc)}
+  .f-field.lit input,.f-field.lit textarea{border-color:var(--fc);
+      box-shadow:0 12px 16px -14px var(--fc)}
+  #contact .strengths{margin-top:26px}
+  #contact .cta{margin-top:24px}
+  #contact .mailsmall{display:block;margin-top:20px;font-size:11px;letter-spacing:.18em;
+      text-transform:uppercase;color:#5c6a63;text-decoration:none;transition:.25s}
   @media (hover:hover){
-    #contact .mail:hover{text-shadow:0 0 24px var(--mint),0 0 72px var(--mint)}
+    #contact .mailsmall:hover{color:#fff;text-shadow:0 0 10px var(--mint)}
   }
-  #contact .sub{margin-top:18px;font-size:13px;letter-spacing:.14em;color:#9ab;text-transform:uppercase}
-  #contact .cta{pointer-events:auto;display:inline-block;margin-top:26px;padding:12px 30px;
-      text-decoration:none;backdrop-filter:none}
 
   .hint{position:absolute;bottom:calc(26px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
       font-size:11px;color:#555;
@@ -92,6 +104,9 @@
     #logoEnd .word{letter-spacing:.18em;font-size:clamp(26px,7.5vw,44px)}
     .rstep{max-width:44vw}
     .rstep h2,.rstep .gh{font-size:13px}
+    .f-row{flex-direction:column;gap:18px}
+    #contact .strengths{flex-wrap:wrap}
+    .f-field textarea{min-height:46px}
     #logoEnd .cta{padding:15px 32px}
     .hint{bottom:calc(16px + env(safe-area-inset-bottom))}
   }
@@ -172,9 +187,29 @@
 
   <div id="contact">
     <div class="lbl">Get in touch</div>
-    <a class="mail" href="mailto:sales@glowpouches.com">sales@glowpouches.com</a>
-    <div class="sub">Wholesale &amp; stockist enquiries welcome</div>
-    <a class="cta" href="mailto:sales@glowpouches.com?subject=Wholesale%20enquiry">Wholesale enquiry</a>
+    <form id="cForm" novalidate>
+      <div class="f-row">
+        <div class="f-field" style="--fc:var(--mint)">
+          <label for="cName">Name</label>
+          <input id="cName" name="name" type="text" autocomplete="name">
+        </div>
+        <div class="f-field" style="--fc:var(--ice)">
+          <label for="cEmail">Email</label>
+          <input id="cEmail" name="email" type="email" autocomplete="email">
+        </div>
+      </div>
+      <div class="f-row">
+        <div class="f-field" style="--fc:var(--berry)">
+          <label for="cMsg">Message</label>
+          <textarea id="cMsg" name="message" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="strengths" id="cTopic">
+        <button type="button" class="on">Wholesale</button><button type="button">Stockists</button><button type="button">Say hi</button>
+      </div>
+      <button class="cta" type="submit">Send it</button>
+    </form>
+    <a class="mailsmall" href="mailto:sales@glowpouches.com">or email sales@glowpouches.com</a>
   </div>
 
   <div class="hint">Scroll</div>
@@ -497,6 +532,32 @@ function wireStrengths(panelId, group){
 }
 wireStrengths('panelA', lefts);
 wireStrengths('panelB', rights);
+
+/* contact form: fields light up as they fill, topic pills, mailto handoff */
+const cForm = document.getElementById('cForm');
+cForm.querySelectorAll('input, textarea').forEach(el=>{
+  el.addEventListener('input', ()=> el.closest('.f-field').classList.toggle('lit', !!el.value.trim()));
+});
+const topics = [...document.querySelectorAll('#cTopic button')];
+topics.forEach(b=>b.addEventListener('click', ()=>{
+  topics.forEach(x=>x.classList.remove('on')); b.classList.add('on'); bloomKick(.55);
+}));
+cForm.addEventListener('submit', e=>{
+  e.preventDefault();
+  const send = cForm.querySelector('.cta');
+  const name = cForm.name.value.trim(), email = cForm.email.value.trim(), msg = cForm.message.value.trim();
+  if(!name || !email || !msg){
+    send.textContent = 'Fill it all in';
+    setTimeout(()=>send.textContent = 'Send it', 1600);
+    return;
+  }
+  const topic = document.querySelector('#cTopic button.on').textContent;
+  location.href = 'mailto:sales@glowpouches.com'
+    + '?subject=' + encodeURIComponent(topic + ' — ' + name)
+    + '&body=' + encodeURIComponent(msg + '\n\n— ' + name + ' (' + email + ')');
+  send.textContent = 'Glowing ✓';
+  bloomKick();
+});
 pucks.forEach(g=>{
   g.userData.core.material.opacity = coreOpacityFor(g.userData.em);
   g.userData.rim.material.opacity = rimOpacityFor(g.userData.em);
@@ -514,7 +575,8 @@ addEventListener('pointermove', e=>{
 
 /* drag to spin the parked row (touch-action:pan-y hands horizontal drags to us) */
 let dragging = false, lastX = 0, spinVel = 0;
-addEventListener('pointerdown', e=>{ if(e.target.tagName!=='BUTTON'){ dragging=true; lastX=e.clientX; }});
+addEventListener('pointerdown', e=>{
+  if(e.target.tagName!=='BUTTON' && !e.target.closest('#contact')){ dragging=true; lastX=e.clientX; }});
 addEventListener('pointerup',     ()=> dragging=false);
 addEventListener('pointercancel', ()=> dragging=false);  // browser claimed the gesture for scrolling
 addEventListener('pointermove', e=>{ if(dragging){ spinVel += (e.clientX-lastX)*.0018; lastX=e.clientX; }});
