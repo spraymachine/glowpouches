@@ -16,7 +16,7 @@
   #gl{position:fixed;inset:0;width:100%;height:100%;z-index:0}
 
   /* scroll track: gives the page height; stage content is fixed */
-  #track{height:840vh}
+  #track{height:920vh}
 
   .overlay{position:fixed;inset:0;z-index:2;pointer-events:none}
 
@@ -60,6 +60,21 @@
   .rstep.tr{top:calc(clamp(36px,9vh,110px) + env(safe-area-inset-top));right:calc(clamp(36px,7vw,120px) + env(safe-area-inset-right));text-align:right}
   .rstep.bl{bottom:calc(clamp(36px,9vh,110px) + env(safe-area-inset-bottom));left:calc(clamp(36px,7vw,120px) + env(safe-area-inset-left))}
   .rstep.br{bottom:calc(clamp(36px,9vh,110px) + env(safe-area-inset-bottom));right:calc(clamp(36px,7vw,120px) + env(safe-area-inset-right));text-align:right}
+
+  /* contact chapter (final scroll tick) */
+  #contact{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;opacity:0;
+      width:max-content;max-width:94vw}
+  #contact .lbl{font-size:12px;letter-spacing:.4em;text-transform:uppercase;color:#8fa;
+      text-shadow:0 0 10px var(--mint);margin-bottom:22px}
+  #contact .mail{display:inline-block;font-size:clamp(22px,3.4vw,46px);font-weight:200;letter-spacing:.06em;
+      color:#fff;text-decoration:none;pointer-events:auto;
+      text-shadow:0 0 14px var(--mint),0 0 44px var(--mint);transition:.25s}
+  @media (hover:hover){
+    #contact .mail:hover{text-shadow:0 0 24px var(--mint),0 0 72px var(--mint)}
+  }
+  #contact .sub{margin-top:18px;font-size:13px;letter-spacing:.14em;color:#9ab;text-transform:uppercase}
+  #contact .cta{pointer-events:auto;display:inline-block;margin-top:26px;padding:12px 30px;
+      text-decoration:none;backdrop-filter:none}
 
   .hint{position:absolute;bottom:calc(26px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
       font-size:11px;color:#555;
@@ -153,6 +168,13 @@
     <h2>Bin it &amp; go</h2>
     <span class="gh gc" aria-hidden="true">Bin it &amp; go</span>
     <span class="gh gm" aria-hidden="true">Bin it &amp; go</span>
+  </div>
+
+  <div id="contact">
+    <div class="lbl">Get in touch</div>
+    <a class="mail" href="mailto:sales@glowpouches.com">sales@glowpouches.com</a>
+    <div class="sub">Wholesale &amp; stockist enquiries welcome</div>
+    <a class="cta" href="mailto:sales@glowpouches.com?subject=Wholesale%20enquiry">Wholesale enquiry</a>
   </div>
 
   <div class="hint">Scroll</div>
@@ -450,6 +472,16 @@ const RS_ACCENT = ['#4dffc3','#ffd24d','#4dc9ff','#ff4d9e'];
 });
 tl.to({}, {duration:.4})
   .addLabel('ritualEnd');
+
+/* ================= contact chapter: logo hands off to contact card ================= */
+const c0 = tl.duration() + .2;
+tl.to('#logoEnd', {autoAlpha:0, y:-46, duration:.45, ease:'power2.in'}, c0)
+  .to('.rstep', {opacity:.16, duration:.6, ease:'power1.inOut'}, c0)
+  .fromTo('#contact',
+    {autoAlpha:0, scale:1.08, filter:'blur(14px) brightness(2.2)'},
+    {autoAlpha:1, scale:1, filter:'blur(0px) brightness(1)', duration:.45, ease:'power2.out'}, c0+.35)
+  .addLabel('contact', c0+.8)
+  .to({}, {duration:.4});
 
 /* ================= interactions ================= */
 function wireStrengths(panelId, group){
