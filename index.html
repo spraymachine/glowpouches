@@ -438,23 +438,25 @@ tl.to('#logoEnd', {opacity:1, duration:.5, ease:'power2.out',
   .addLabel('end')
   .to({}, {duration:.3});
 
-/* ================= ritual chapter: four corner steps ================= */
+/* ================= ritual chapter: four corner steps =================
+   each entry finishes AT its label so the scroll snap always rests on a
+   fully-lit step (same trick as the camera "parked by the snap point") */
 const RS_ACCENT = ['#4dffc3','#ffd24d','#4dc9ff','#ff4d9e'];
 ['#rs1','#rs2','#rs3','#rs4'].forEach((sel,i)=>{
-  const c = RS_ACCENT[i], at = 'step'+(i+1);
-  tl.addLabel(at, '>.25')
-    .fromTo(sel,
+  const c = RS_ACCENT[i], t0 = tl.duration() + .25;   // entry begins .25 after previous step settles
+  tl.fromTo(sel,
       {autoAlpha:0, scale:1.1, filter:'blur(16px) brightness(2.4)'},
-      {autoAlpha:1, scale:1, filter:'blur(0px) brightness(1)', duration:.4, ease:'power2.out'}, at)
+      {autoAlpha:1, scale:1, filter:'blur(0px) brightness(1)', duration:.4, ease:'power2.out'}, t0)
+    .fromTo(sel+' .gc', {x:-12, opacity:.7}, {x:0, opacity:0, duration:.25, ease:'power2.out'}, t0)
+    .fromTo(sel+' .gm', {x:12,  opacity:.7}, {x:0, opacity:0, duration:.25, ease:'power2.out'}, t0)
     .fromTo(sel+' h2',
       {textShadow:`0 0 16px ${c}, 0 0 36px ${c}`},
-      {textShadow:`0 0 7px ${c}, 0 0 18px ${c}`, duration:.2, ease:'power1.out'}, at+'+=.3')
-    .fromTo(sel+' .gc', {x:-12, opacity:.7}, {x:0, opacity:0, duration:.25, ease:'power2.out'}, at)
-    .fromTo(sel+' .gm', {x:12,  opacity:.7}, {x:0, opacity:0, duration:.25, ease:'power2.out'}, at)
-    .fromTo(sel+' .ring', {scale:.4, opacity:.9}, {scale:1.4, opacity:0, duration:.3, ease:'power2.out'}, at+'+=.3');
+      {textShadow:`0 0 7px ${c}, 0 0 18px ${c}`, duration:.2, ease:'power1.out'}, t0+.3)
+    .fromTo(sel+' .ring', {scale:.4, opacity:.9}, {scale:1.4, opacity:0, duration:.3, ease:'power2.out'}, t0+.3)
+    .addLabel('step'+(i+1), t0+.6);
 });
-tl.addLabel('ritualEnd', '>.1')
-  .to({}, {duration:.4});
+tl.to({}, {duration:.4})
+  .addLabel('ritualEnd');
 
 /* ================= interactions ================= */
 function wireStrengths(panelId, group){
