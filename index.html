@@ -433,12 +433,30 @@ const headline = document.getElementById('headline');
 /* ================= scrubbed master timeline ================= */
 gsap.set('#panelA, #panelB', {y:24, autoAlpha:0});
 
+/* touch snap: directional with a dead-zone. Plain labelsDirectional commits to the
+   NEXT chapter on any downward movement, so a tiny thumb nudge catapults a full
+   section (fast-forwarding whole scenes). Instead: a nudge that travels <15% of the
+   gap eases back to the current tick; a real swipe still advances. Desktop keeps
+   labelsDirectional — discrete wheel ticks stepping chapters is the intended feel. */
+let labelP;
+function snapTick(value, self){
+  if(!labelP) labelP = Object.values(tl.labels).map(t=>t/tl.duration()).sort((a,b)=>a-b);
+  let prev = labelP[0], next = labelP[labelP.length-1];
+  for(const p of labelP){ if(p <= value + 1e-4) prev = p; else { next = p; break; } }
+  if(next <= prev) return prev;
+  const frac = (value - prev)/(next - prev);
+  return (self.direction || 1) > 0 ? (frac > .15 ? next : prev) : (frac < .85 ? prev : next);
+}
+
 const tl = gsap.timeline({
   defaults:{ease:'none'},
   scrollTrigger:{
     trigger:'#track', start:'top top', end:'bottom bottom',
     scrub:1, invalidateOnRefresh:true,
-    snap:{snapTo:'labelsDirectional', duration:{min:.25,max:.7}, ease:'power1.inOut'}
+    /* delay:.05 — default snap delay is half the scrub lag; stacked on the touch
+       momentum tail it left the page stranded mid-scene for seconds before snapping */
+    snap:{snapTo: COARSE ? snapTick : 'labelsDirectional', delay:.05,
+        duration:{min:.25,max:.7}, ease:'power1.inOut'}
   }
 });
 
