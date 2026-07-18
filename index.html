@@ -433,30 +433,25 @@ const headline = document.getElementById('headline');
 /* ================= scrubbed master timeline ================= */
 gsap.set('#panelA, #panelB', {y:24, autoAlpha:0});
 
-/* touch snap: directional with a dead-zone. Plain labelsDirectional commits to the
-   NEXT chapter on any downward movement, so a tiny thumb nudge catapults a full
-   section (fast-forwarding whole scenes). Instead: a nudge that travels <15% of the
-   gap eases back to the current tick; a real swipe still advances. Desktop keeps
-   labelsDirectional — discrete wheel ticks stepping chapters is the intended feel. */
-let labelP;
-function snapTick(value, self){
-  if(!labelP) labelP = Object.values(tl.labels).map(t=>t/tl.duration()).sort((a,b)=>a-b);
-  let prev = labelP[0], next = labelP[labelP.length-1];
-  for(const p of labelP){ if(p <= value + 1e-4) prev = p; else { next = p; break; } }
-  if(next <= prev) return prev;
-  const frac = (value - prev)/(next - prev);
-  return (self.direction || 1) > 0 ? (frac > .15 ? next : prev) : (frac < .85 ? prev : next);
-}
+/* Scroll sync — the hard part on touch.
+   scrub:1 keeps the animation a full second behind the finger; on a phone, where
+   scroll gestures are short and quick, that lag alone reads as "sync is broken."
+   A dead-zone snap made it worse: a small nudge scrubbed forward, then the snap
+   dragged progress BACKWARD to the current tick — a visible reverse of the scene.
+   Fix: on touch, tighten the scrub so the animation tracks the finger, and let snap
+   only ever resolve in the scroll DIRECTION (labelsDirectional). Forward nudge ->
+   glide on to the next chapter; never a backward yank. inertia:false so the snap
+   target is measured from where the finger actually lifted, not a momentum guess. */
+const SCRUB = COARSE ? .45 : 1;
 
 const tl = gsap.timeline({
   defaults:{ease:'none'},
   scrollTrigger:{
     trigger:'#track', start:'top top', end:'bottom bottom',
-    scrub:1, invalidateOnRefresh:true,
-    /* delay:.05 — default snap delay is half the scrub lag; stacked on the touch
-       momentum tail it left the page stranded mid-scene for seconds before snapping */
-    snap:{snapTo: COARSE ? snapTick : 'labelsDirectional', delay:.05,
-        duration:{min:.25,max:.7}, ease:'power1.inOut'}
+    scrub:SCRUB, invalidateOnRefresh:true,
+    snap:{snapTo:'labelsDirectional', delay:.03,
+        duration:{min:.2,max:.5}, ease:'power1.inOut',
+        inertia: !COARSE, directional:true}
   }
 });
 
