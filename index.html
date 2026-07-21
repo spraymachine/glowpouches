@@ -250,18 +250,22 @@ const canvas = document.getElementById('gl');
 /* antialias:false — the composer's MSAA target does the AA; a multisampled canvas
    backbuffer would just burn mobile fill rate rendering one screen quad */
 const renderer = new THREE.WebGLRenderer({canvas, antialias:false});
-/* Adaptive resolution — the master quality/perf lever: this is a fill-rate-bound scene
-   (everything flows through the bloom mip chain) so cost scales with dpr^2. Decoupled
-   start / ceiling / floor: launch BELOW the ceiling so the heavy unmeasured first ~1.5s
-   (headline flicker + first assemble) can't hitch, then the governor climbs capable GPUs
-   up to the ceiling and steps weak ones down to the floor. Touch ceiling 1.75 (2.0 was
-   tested and stutters in scroll); the governor actually bites now (setDpr drives
-   composer._pixelRatio — see below), so even that ceiling has a real safety valve. */
-const DPR_CEIL  = Math.min(devicePixelRatio, COARSE ? 1.75 : 2);  // 1.75 is the mobile sharpness that holds 60fps in scroll; 2.0 stutters
-const DPR_FLOOR = Math.min(DPR_CEIL, COARSE ? 1 : 1.25);          // hard safety floor
-const DPR_START = Math.min(DPR_CEIL, COARSE ? 1.5 : 2);          // proven-safe launch on touch (no scroll-stutter risk); climbs to 1.75 parked
-let dpr = DPR_START, dynMax = DPR_CEIL;
-renderer.setPixelRatio(dpr);   // MUST precede the EffectComposer ctor so composer._pixelRatio captures DPR_START
+/* Adaptive resolution — the master quality/perf lever. Fill-rate-bound scene (everything
+   flows through the bloom mip chain) so cost scales with dpr^2. The bind: crisp 3D wants a
+   high DPR, but a high DPR stutters during the scrub. Resolution is the ONLY thing that must
+   trade off, and it trades on SCROLL STATE — the softness of a lower DPR is invisible while
+   the scene is flying past, and a phone's native density only matters when you stop to look.
+   So: render light (DPR_MOVE) while scrolling, and climb toward near-native (DPR_REST) once
+   parked, where the pixelation was actually showing. The perf governor rides on top, ratchets
+   the rest ceiling down on any device that can't hold it. Touch native is usually 3; we aim
+   the rest ceiling at the display's NATIVE density (capped 3) so parked has zero upscaling —
+   pixel-for-pixel crisp — and let weak devices ratchet back. setDpr drives composer._pixelRatio
+   (see below) so this actually bites; the perf governor keeps native from ever stuttering. */
+const DPR_REST  = Math.min(devicePixelRatio, COARSE ? 3 : 2);    // native-crisp ceiling while parked (climbs here)
+const DPR_MOVE  = Math.min(DPR_REST, COARSE ? 1.5 : 2);          // light + smooth while actively scrolling
+const DPR_FLOOR = Math.min(DPR_REST, COARSE ? 1 : 1.25);         // hard safety floor
+let dpr = DPR_MOVE, dynMax = DPR_REST;                            // launch light; climb once parked
+renderer.setPixelRatio(dpr);   // MUST precede the EffectComposer ctor so composer._pixelRatio captures the launch DPR
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(0x000000, 0.055);
@@ -671,14 +675,16 @@ addEventListener('pointermove', e=>{ if(dragging){ spinVel += (e.clientX-lastX)*
 const clock = new THREE.Clock();
 const smooth = {x:0, y:0};
 
-/* Resolution governor: ~1.5s windows. Symmetric hysteresis — two slow windows step DOWN,
-   two fast windows step UP — so a single lucky/unlucky window can't over-drop or over-climb.
-   dynMax only ever ratchets down (a level that failed is never re-attempted) so DPR can't
-   oscillate. The catch: changing DPR reallocates the composer + bloom targets (~a frame of
-   hitch). A DOWN-step is fine mid-scroll (frames are already slow, the hitch hides in the
-   jank) but a CLIMB must never hitch a smooth scroll — so climbs only fire after the scene
-   has been genuinely parked (stillFrames), never during motion. Net feel: full sharpness the
-   moment you settle on a chapter, lower cost while scrolling (where you can't see it anyway). */
+/* Resolution governor: resolution tracks SCROLL STATE, with a perf safety net on top.
+   - MOVING: the instant real scrolling starts, shed to DPR_MOVE. Softness is invisible in
+     motion, and this guarantees the scrub stays smooth no matter the device.
+   - PARKED: after the scene has been still ~0.75s, climb in .5 steps toward DPR_REST so the
+     3D resolves crisp where the eye can actually see it — this is the pixelation fix.
+   - SAFETY: two slow ~1.5s windows ratchet dynMax (the rest ceiling) down and never re-climb
+     into that wall, so a device that can't hold the crisp ceiling settles lower without
+     oscillating. DPR changes reallocate the composer+bloom targets (~a frame hitch); climbs
+     fire only while parked and the moving-drop hides in the motion, so hitches never land on
+     a smooth scroll. */
 let lastT = 0, stillFrames = 0;
 const perf = {acc:0, n:0, bad:0, good:0, cool:2};
 /* THE fix: drive BOTH the renderer AND the composer. EffectComposer captured the pixel ratio
@@ -686,7 +692,7 @@ const perf = {acc:0, n:0, bad:0, good:0, cool:2};
    mip chain (the whole dpr^2 fill cost) pinned at the launch DPR — the governor was near-inert.
    composer.setPixelRatio re-runs setSize internally, reallocating every pass at the new res. */
 function setDpr(v){
-  v = Math.min(DPR_CEIL, Math.max(DPR_FLOOR, v));
+  v = Math.min(DPR_REST, Math.max(DPR_FLOOR, v));
   if(v === dpr) return;
   dpr = v;
   renderer.setPixelRatio(v);
@@ -694,10 +700,14 @@ function setDpr(v){
 }
 function govern(dt){
   if(dt <= 0 || dt > .25) return;            // tab-hidden gap, ignore
-  // parked = scroll velocity ~0 for ~0.75s straight; a brief gap between scroll bursts
-  // can't fake it (the counter resets on any real motion), so climbs never hitch a scroll
   const vel = (tl && tl.scrollTrigger) ? Math.abs(tl.scrollTrigger.getVelocity()) : 0;
-  stillFrames = vel < 20 ? stillFrames + 1 : 0;
+  const moving = vel > 40;
+  stillFrames = moving ? 0 : stillFrames + 1;
+  // scrolling started -> immediately shed to the scroll-safe resolution (crispness isn't
+  // visible in motion, and this keeps the scrub smooth on any device)
+  if(moving && dpr > DPR_MOVE){
+    setDpr(DPR_MOVE); perf.acc = perf.n = perf.bad = perf.good = 0; perf.cool = 1; return;
+  }
   perf.acc += dt; perf.n++;
   if(perf.n < 90) return;
   const avg = perf.acc/perf.n;
@@ -706,10 +716,10 @@ function govern(dt){
   perf.good = avg < .017 ? perf.good+1 : 0;  // >~59fps
   if(perf.cool > 0){ perf.cool--; return; }
   if(perf.bad >= 2 && dpr > DPR_FLOOR){
-    dynMax = Math.max(DPR_FLOOR, dpr - .25);          // ratchet the ceiling down — never re-climb into this wall
-    setDpr(dpr - .25); perf.bad = perf.good = 0; perf.cool = 2;
+    dynMax = Math.max(DPR_FLOOR, dpr - .5);           // rest ceiling too heavy — lower it, don't re-climb
+    setDpr(dpr - .5); perf.bad = perf.good = 0; perf.cool = 2;
   }else if(perf.good >= 2 && dpr < dynMax && stillFrames > 45){
-    setDpr(dpr + .25); perf.good = 0; perf.cool = 3;  // sharpen a step — only while parked
+    setDpr(Math.min(dynMax, dpr + .5)); perf.good = 0; perf.cool = 1;  // parked -> sharpen toward native (brief settle, then next step)
   }
 }
 
