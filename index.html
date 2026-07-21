@@ -262,7 +262,7 @@ const renderer = new THREE.WebGLRenderer({canvas, antialias:false});
    pixel-for-pixel crisp — and let weak devices ratchet back. setDpr drives composer._pixelRatio
    (see below) so this actually bites; the perf governor keeps native from ever stuttering. */
 const DPR_REST  = Math.min(devicePixelRatio, COARSE ? 3 : 2);    // native-crisp ceiling while parked (climbs here)
-const DPR_MOVE  = Math.min(DPR_REST, COARSE ? 1.5 : 2);          // light + smooth while actively scrolling
+const DPR_MOVE  = Math.min(DPR_REST, COARSE ? 2 : 2);           // crisp even in motion now bloom is decoupled+cheap (governor drops it if a device can't hold it)
 const DPR_FLOOR = Math.min(DPR_REST, COARSE ? 1 : 1.25);         // hard safety floor
 let dpr = DPR_MOVE, dynMax = DPR_REST;                            // launch light; climb once parked
 renderer.setPixelRatio(dpr);   // MUST precede the EffectComposer ctor so composer._pixelRatio captures the launch DPR
@@ -298,11 +298,25 @@ composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(1,1), 1.15, .65, .12);
 composer.addPass(bloom);
 
+/* Bloom resolution decoupled from scene resolution — this is what lets the 3D render sharp.
+   The bloom mip chain is by far the heaviest pass and it scaled with the scene DPR, so a
+   crisp (high-DPR) scene made bloom explode and the governor had to keep DPR low = pixelated.
+   But bloom is a BLUR — its blur targets can run at a low fixed resolution with no visible
+   loss. So we cap the bloom's internal size (BLOOM_DPR) while the scene renders at full DPR.
+   The base scene is composited at the composer's full res (crisp); only the soft glow is
+   low-res. composer.setSize/setPixelRatio reset bloom to full res, so re-apply after each. */
+const BLOOM_DPR = COARSE ? 1.25 : 2;
+function fitBloom(){
+  const bd = Math.min(dpr, BLOOM_DPR);
+  bloom.setSize(Math.max(1, Math.round(innerWidth * bd)), Math.max(1, Math.round(innerHeight * bd)));
+}
+
 function resize(){
   const w = innerWidth, h = innerHeight;
   if(!w || !h) return;               // hidden pane / zero-size viewport: keep last sane state
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
+  fitBloom();                        // re-cap bloom (composer.setSize just reset it to full res)
   camera.aspect = w/h;
   fitFov();
   camera.updateProjectionMatrix();
@@ -697,6 +711,7 @@ function setDpr(v){
   dpr = v;
   renderer.setPixelRatio(v);
   composer.setPixelRatio(v);
+  fitBloom();                        // keep bloom capped cheap even as the scene DPR climbs
 }
 function govern(dt){
   if(dt <= 0 || dt > .25) return;            // tab-hidden gap, ignore
