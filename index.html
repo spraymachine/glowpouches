@@ -254,11 +254,12 @@ const renderer = new THREE.WebGLRenderer({canvas, antialias:false});
    (everything flows through the bloom mip chain) so cost scales with dpr^2. Decoupled
    start / ceiling / floor: launch BELOW the ceiling so the heavy unmeasured first ~1.5s
    (headline flicker + first assemble) can't hitch, then the governor climbs capable GPUs
-   up to the ceiling and steps weak ones down to the floor. Touch ceiling raised 1.5->1.75
-   now that the governor actually bites (setDpr drives composer._pixelRatio — see below). */
-const DPR_CEIL  = Math.min(devicePixelRatio, COARSE ? 1.75 : 2);   // how sharp we may climb
-const DPR_FLOOR = Math.min(DPR_CEIL, COARSE ? 1 : 1.25);           // hard safety floor
-const DPR_START = Math.min(DPR_CEIL, COARSE ? 1.5 : 2);           // proven-safe launch on touch; climbs to ceiling once parked
+   up to the ceiling and steps weak ones down to the floor. Touch ceiling 1.75 (2.0 was
+   tested and stutters in scroll); the governor actually bites now (setDpr drives
+   composer._pixelRatio — see below), so even that ceiling has a real safety valve. */
+const DPR_CEIL  = Math.min(devicePixelRatio, COARSE ? 1.75 : 2);  // 1.75 is the mobile sharpness that holds 60fps in scroll; 2.0 stutters
+const DPR_FLOOR = Math.min(DPR_CEIL, COARSE ? 1 : 1.25);          // hard safety floor
+const DPR_START = Math.min(DPR_CEIL, COARSE ? 1.5 : 2);          // proven-safe launch on touch (no scroll-stutter risk); climbs to 1.75 parked
 let dpr = DPR_START, dynMax = DPR_CEIL;
 renderer.setPixelRatio(dpr);   // MUST precede the EffectComposer ctor so composer._pixelRatio captures DPR_START
 const scene = new THREE.Scene();
@@ -279,11 +280,11 @@ function zScale(){
 }
 
 /* composer bypasses the canvas's built-in AA — its MSAA target does all the edge AA. Thin
-   bright rotating torus rims on pure black are the exact edge-crawl case MSAA fixes, and
-   bloom amplifies any aliased edge, so it's high value here. Desktop climbs to 8x — but only
-   on non-huge framebuffers, since a 4K/5K panel at 8x RGBA16F is ~1GB per ping-pong target
-   (context-loss risk) — and never past the GPU's max. Touch stays 2x: HalfFloat MSAA is
-   fixed at construction and the governor can't shed it, so it must stay cheap on phones. */
+   bright rotating torus rims on pure black are the exact edge-crawl case MSAA fixes. Touch
+   stays 2x: MSAA is fixed at construction and the DPR governor can't shed it, so it must
+   stay cheap on phones — and the bright rims are bloom-softened anyway, so the payoff is
+   small. Desktop climbs to 8x — but only on non-huge framebuffers, since a 4K/5K panel at
+   8x RGBA16F is ~1GB per ping-pong target (context-loss risk) — and never past the GPU max. */
 const MAX_SAMPLES = renderer.capabilities.maxSamples;
 const BIG_FB = Math.max(innerWidth, innerHeight) * Math.min(devicePixelRatio, 2) > 2560;
 const MSAA = Math.min(COARSE ? 2 : (BIG_FB ? 4 : 8), MAX_SAMPLES);
@@ -337,9 +338,13 @@ resize();
     gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)');
     x.globalAlpha = a; x.fillStyle = gr; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI*2); x.fill();
   };
-  blob(58, 38, 82, '#4dffc3', .55);   // mint, upper
-  blob(202, 44, 78, '#4dc9ff', .45);  // ice, upper
-  blob(132, 108, 92, '#c04dff', .32); // berry, lower band
+  // bright soft light-sources for the glossy metal to catch — reads as studio highlights
+  x.fillStyle = 'rgba(30,40,38,1)'; x.fillRect(0, 30, 256, 30);  // faint horizon band -> rim highlight
+  blob(60, 34, 96, '#8fffe0', .95);   // mint key, upper-left (brightest)
+  blob(198, 40, 88, '#7fe0ff', .8);   // ice fill, upper-right
+  blob(128, 20, 70, '#ffffff', .5);   // white top spec
+  blob(96, 112, 96, '#c04dff', .5);   // berry bounce, lower
+  blob(170, 116, 84, '#ff4d9e', .4);  // rose bounce, lower
   x.globalAlpha = 1;
   const tex = new THREE.CanvasTexture(c);
   tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -357,7 +362,7 @@ const floor = new THREE.Mesh(
   new THREE.CircleGeometry(40, 48),
   /* envMapIntensity kept very low: the near-mirror metal floor would otherwise smear the
      gradient across the void and turn "floating in black" into "sitting on a floor" */
-  new THREE.MeshStandardMaterial({color:0x050505, roughness:.32, metalness:.85, envMapIntensity:.14})
+  new THREE.MeshStandardMaterial({color:0x050505, roughness:.32, metalness:.85, envMapIntensity:.3})
 );
 floor.rotation.x = -Math.PI/2; floor.position.y = -1.15; scene.add(floor);
 
@@ -407,7 +412,7 @@ const pucks = FLAVORS.map(f=>{
   const g = new THREE.Group();
   const body = new THREE.Mesh(puckGeo, new THREE.MeshPhysicalMaterial({
     color:0x0e0e0e, roughness:.28, metalness:.6, clearcoat:.8, clearcoatRoughness:.25,
-    envMapIntensity:.32, transparent:true}));   // subtle glossy reflections off the dark env
+    envMapIntensity:.85, transparent:true}));   // glossy reflections off the dark env — dimensional metal
   const core = new THREE.Mesh(
     new THREE.CylinderGeometry(.4,.4,.31,96),
     new THREE.MeshBasicMaterial({color:f.c, transparent:true, opacity:.95}));
