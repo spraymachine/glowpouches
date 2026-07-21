@@ -314,7 +314,10 @@ function fitBloom(){
 function resize(){
   const w = innerWidth, h = innerHeight;
   if(!w || !h) return;               // hidden pane / zero-size viewport: keep last sane state
-  renderer.setSize(w, h, false);
+  /* let setSize write inline px styles (no `false`): the stylesheet's height:100% is the
+     iOS fixed-viewport height, which differs from innerHeight while the URL bar shows —
+     that mismatch stretched the buffer non-1:1 and blurred the whole 3D layer */
+  renderer.setSize(w, h);
   composer.setSize(w, h);
   fitBloom();                        // re-cap bloom (composer.setSize just reset it to full res)
   camera.aspect = w/h;
@@ -392,8 +395,20 @@ for(let i=0;i<N;i++){
   dpos[i*3+2] = (Math.random()-.5)*34 - 4;
 }
 dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos, 3));
+/* soft round sprite — an untextured PointsMaterial renders hard-edged SQUARES, and a square
+   drifting near the camera reads as a giant dead pixel. No amount of DPR fixes that. */
+const dustTex = (()=>{
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(.45, 'rgba(255,255,255,.5)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
 const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
-  color:0x4dffc3, size:.035, transparent:true, opacity:.5, depthWrite:false}));
+  color:0x4dffc3, size:.05, map:dustTex, transparent:true, opacity:.5, depthWrite:false}));
 scene.add(dust);
 
 /* ================= pucks (placeholder — swap GLB per flavor here) ================= */
@@ -699,8 +714,11 @@ const smooth = {x:0, y:0};
      oscillating. DPR changes reallocate the composer+bloom targets (~a frame hitch); climbs
      fire only while parked and the moving-drop hides in the motion, so hitches never land on
      a smooth scroll. */
+/* cool starts at 4 windows (~6s): first-load shader compile / PMREM / assemble jank must be
+   FORGIVEN, not counted — on real phones it was ratcheting dynMax down before steady state,
+   permanently capping the rest resolution the user actually sees */
 let lastT = 0, stillFrames = 0;
-const perf = {acc:0, n:0, bad:0, good:0, cool:2};
+const perf = {acc:0, n:0, bad:0, good:0, cool:4};
 /* THE fix: drive BOTH the renderer AND the composer. EffectComposer captured the pixel ratio
    ONCE at construction, so renderer.setPixelRatio alone left the scene render + entire bloom
    mip chain (the whole dpr^2 fill cost) pinned at the launch DPR — the governor was near-inert.
@@ -719,17 +737,19 @@ function govern(dt){
   const moving = vel > 40;
   stillFrames = moving ? 0 : stillFrames + 1;
   // scrolling started -> immediately shed to the scroll-safe resolution (crispness isn't
-  // visible in motion, and this keeps the scrub smooth on any device)
-  if(moving && dpr > DPR_MOVE){
-    setDpr(DPR_MOVE); perf.acc = perf.n = perf.bad = perf.good = 0; perf.cool = 1; return;
+  // visible in motion, and this keeps the scrub smooth on any device). Clamp by dynMax:
+  // never force a level onto a device whose ceiling already ratcheted below it.
+  const moveDpr = Math.min(DPR_MOVE, dynMax);
+  if(moving && dpr > moveDpr){
+    setDpr(moveDpr); perf.acc = perf.n = perf.bad = perf.good = 0; perf.cool = 1; return;
   }
   perf.acc += dt; perf.n++;
   if(perf.n < 90) return;
   const avg = perf.acc/perf.n;
   perf.acc = 0; perf.n = 0;
-  perf.bad  = avg > .024 ? perf.bad+1  : 0;  // <~42fps
-  perf.good = avg < .017 ? perf.good+1 : 0;  // >~59fps
-  if(perf.cool > 0){ perf.cool--; return; }
+  perf.bad  = avg > .024  ? perf.bad+1  : 0;  // <~42fps
+  perf.good = avg < .0175 ? perf.good+1 : 0;  // ≥~57fps (real 60Hz rAF jitters right at .0167 — .017 was too strict to ever climb)
+  if(perf.cool > 0){ perf.cool--; perf.bad = 0; return; }  // warm-up/settle windows are forgiven, not counted
   if(perf.bad >= 2 && dpr > DPR_FLOOR){
     dynMax = Math.max(DPR_FLOOR, dpr - .5);           // rest ceiling too heavy — lower it, don't re-climb
     setDpr(dpr - .5); perf.bad = perf.good = 0; perf.cool = 2;
@@ -774,6 +794,29 @@ document.addEventListener('visibilitychange', ()=>{
 /* debug handle (harmless in production) */
 window.__glow = {scene, camera, pucks, tl, composer, bloom, renderer, setDpr,
   get stackX(){return STACK_X}, get dpr(){return dpr}, get dynMax(){return dynMax}, camState};
+
+/* on-device telemetry: open ?debug on a real phone to see exactly what it renders at */
+if(location.search.indexOf('debug') !== -1){
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:calc(56px + env(safe-area-inset-top));left:8px;z-index:99;'
+    + 'font:11px/1.5 monospace;color:#4dffc3;background:#000c;padding:6px 9px;border-radius:6px;'
+    + 'pointer-events:none;white-space:pre';
+  document.body.appendChild(d);
+  let dFrames = 0, dLast = performance.now(), dFps = 0;
+  (function fpsMeter(){ dFrames++; const n = performance.now();
+    if(n - dLast >= 1000){ dFps = Math.round(dFrames*1000/(n-dLast)); dFrames = 0; dLast = n; }
+    requestAnimationFrame(fpsMeter); })();
+  const buf = new THREE.Vector2();
+  setInterval(()=>{
+    renderer.getDrawingBufferSize(buf);
+    d.textContent = 'devicePR ' + devicePixelRatio
+      + '\ndpr ' + dpr + '  ceil ' + dynMax + '/' + DPR_REST
+      + '\nbuffer ' + buf.x + 'x' + buf.y
+      + '\ncanvas ' + canvas.clientWidth + 'x' + canvas.clientHeight
+      + '\nwindow ' + innerWidth + 'x' + innerHeight
+      + '\nfps ' + dFps + '  msaa ' + MSAA;
+  }, 500);
+}
 </script>
 </body>
 </html>
