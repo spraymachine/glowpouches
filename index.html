@@ -250,12 +250,17 @@ const canvas = document.getElementById('gl');
 /* antialias:false — the composer's MSAA target does the AA; a multisampled canvas
    backbuffer would just burn mobile fill rate rendering one screen quad */
 const renderer = new THREE.WebGLRenderer({canvas, antialias:false});
-/* adaptive resolution: start at full sharpness, step down only if the GPU proves it can't keep up.
-   touch devices start lower — bloom cost scales with pixels and phone GPUs start behind */
-const DPR_MAX = Math.min(devicePixelRatio, COARSE ? 1.5 : 2);
-const DPR_MIN = Math.min(DPR_MAX, COARSE ? 1 : 1.25);
-let dpr = DPR_MAX, dynMax = DPR_MAX;
-renderer.setPixelRatio(dpr);
+/* Adaptive resolution — the master quality/perf lever: this is a fill-rate-bound scene
+   (everything flows through the bloom mip chain) so cost scales with dpr^2. Decoupled
+   start / ceiling / floor: launch BELOW the ceiling so the heavy unmeasured first ~1.5s
+   (headline flicker + first assemble) can't hitch, then the governor climbs capable GPUs
+   up to the ceiling and steps weak ones down to the floor. Touch ceiling raised 1.5->1.75
+   now that the governor actually bites (setDpr drives composer._pixelRatio — see below). */
+const DPR_CEIL  = Math.min(devicePixelRatio, COARSE ? 1.75 : 2);   // how sharp we may climb
+const DPR_FLOOR = Math.min(DPR_CEIL, COARSE ? 1 : 1.25);           // hard safety floor
+const DPR_START = Math.min(DPR_CEIL, COARSE ? 1.5 : 2);           // proven-safe launch on touch; climbs to ceiling once parked
+let dpr = DPR_START, dynMax = DPR_CEIL;
+renderer.setPixelRatio(dpr);   // MUST precede the EffectComposer ctor so composer._pixelRatio captures DPR_START
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(0x000000, 0.055);
@@ -273,9 +278,17 @@ function zScale(){
   return Math.max(1, 2.4/(6.6*tanHalf*camera.aspect)); // parked view must fit a 3-puck row
 }
 
-/* composer bypasses the canvas's built-in AA — give its target MSAA (near-free on mobile tilers) */
+/* composer bypasses the canvas's built-in AA — its MSAA target does all the edge AA. Thin
+   bright rotating torus rims on pure black are the exact edge-crawl case MSAA fixes, and
+   bloom amplifies any aliased edge, so it's high value here. Desktop climbs to 8x — but only
+   on non-huge framebuffers, since a 4K/5K panel at 8x RGBA16F is ~1GB per ping-pong target
+   (context-loss risk) — and never past the GPU's max. Touch stays 2x: HalfFloat MSAA is
+   fixed at construction and the governor can't shed it, so it must stay cheap on phones. */
+const MAX_SAMPLES = renderer.capabilities.maxSamples;
+const BIG_FB = Math.max(innerWidth, innerHeight) * Math.min(devicePixelRatio, 2) > 2560;
+const MSAA = Math.min(COARSE ? 2 : (BIG_FB ? 4 : 8), MAX_SAMPLES);
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, {
-  type: THREE.HalfFloatType, samples: COARSE ? 2 : 4}));
+  type: THREE.HalfFloatType, samples: MSAA}));
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(1,1), 1.15, .65, .12);
 composer.addPass(bloom);
@@ -308,13 +321,43 @@ addEventListener('resize', ()=>{
 });
 resize();
 
+/* ================= environment (IBL) =================
+   The puck bodies (metalness .6, clearcoat .8) and floor (metalness .85) sample
+   scene.environment for their reflections; with none set they reflected PURE BLACK and
+   read as flat dark discs — the expensive PBR/clearcoat shading paid for nothing. A DARK,
+   neon-tinted equirect gradient (mostly black, faint palette blobs) gives them glossy,
+   dimensional edge highlights. Kept a whisper via low per-material envMapIntensity so it
+   reads as reflection on the objects, NOT as light spilled into the floating-in-void look. */
+(function buildEnv(){
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = '#000'; x.fillRect(0, 0, 256, 128);
+  const blob = (cx, cy, r, col, a)=>{
+    const gr = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+    gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    x.globalAlpha = a; x.fillStyle = gr; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI*2); x.fill();
+  };
+  blob(58, 38, 82, '#4dffc3', .55);   // mint, upper
+  blob(202, 44, 78, '#4dc9ff', .45);  // ice, upper
+  blob(132, 108, 92, '#c04dff', .32); // berry, lower band
+  x.globalAlpha = 1;
+  const tex = new THREE.CanvasTexture(c);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pmrem = new THREE.PMREMGenerator(renderer);       // prefilter — raw envMap gives wrong rough reflections
+  scene.environment = pmrem.fromEquirectangular(tex).texture;
+  pmrem.dispose(); tex.dispose();
+})();
+
 /* ================= lights / floor / dust ================= */
 scene.add(new THREE.AmbientLight(0x223028, .55));
 const key = new THREE.DirectionalLight(0x8fffe0, .35); key.position.set(4,8,6); scene.add(key);
 
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(40, 48),
-  new THREE.MeshStandardMaterial({color:0x050505, roughness:.32, metalness:.85})
+  /* envMapIntensity kept very low: the near-mirror metal floor would otherwise smear the
+     gradient across the void and turn "floating in black" into "sitting on a floor" */
+  new THREE.MeshStandardMaterial({color:0x050505, roughness:.32, metalness:.85, envMapIntensity:.14})
 );
 floor.rotation.x = -Math.PI/2; floor.position.y = -1.15; scene.add(floor);
 
@@ -364,7 +407,7 @@ const pucks = FLAVORS.map(f=>{
   const g = new THREE.Group();
   const body = new THREE.Mesh(puckGeo, new THREE.MeshPhysicalMaterial({
     color:0x0e0e0e, roughness:.28, metalness:.6, clearcoat:.8, clearcoatRoughness:.25,
-    transparent:true}));
+    envMapIntensity:.32, transparent:true}));   // subtle glossy reflections off the dark env
   const core = new THREE.Mesh(
     new THREE.CylinderGeometry(.4,.4,.31,96),
     new THREE.MeshBasicMaterial({color:f.c, transparent:true, opacity:.95}));
@@ -623,24 +666,45 @@ addEventListener('pointermove', e=>{ if(dragging){ spinVel += (e.clientX-lastX)*
 const clock = new THREE.Clock();
 const smooth = {x:0, y:0};
 
-/* resolution governor: ~1.5s windows; two slow windows in a row -> step down (and never
-   climb back to a level that failed); sustained vsync-locked window -> step back up */
-let lastT = 0;
-const perf = {acc:0, n:0, bad:0, cool:2};
-function setDpr(v){ dpr = v; renderer.setPixelRatio(dpr); resize(); }
+/* Resolution governor: ~1.5s windows. Symmetric hysteresis — two slow windows step DOWN,
+   two fast windows step UP — so a single lucky/unlucky window can't over-drop or over-climb.
+   dynMax only ever ratchets down (a level that failed is never re-attempted) so DPR can't
+   oscillate. The catch: changing DPR reallocates the composer + bloom targets (~a frame of
+   hitch). A DOWN-step is fine mid-scroll (frames are already slow, the hitch hides in the
+   jank) but a CLIMB must never hitch a smooth scroll — so climbs only fire after the scene
+   has been genuinely parked (stillFrames), never during motion. Net feel: full sharpness the
+   moment you settle on a chapter, lower cost while scrolling (where you can't see it anyway). */
+let lastT = 0, stillFrames = 0;
+const perf = {acc:0, n:0, bad:0, good:0, cool:2};
+/* THE fix: drive BOTH the renderer AND the composer. EffectComposer captured the pixel ratio
+   ONCE at construction, so renderer.setPixelRatio alone left the scene render + entire bloom
+   mip chain (the whole dpr^2 fill cost) pinned at the launch DPR — the governor was near-inert.
+   composer.setPixelRatio re-runs setSize internally, reallocating every pass at the new res. */
+function setDpr(v){
+  v = Math.min(DPR_CEIL, Math.max(DPR_FLOOR, v));
+  if(v === dpr) return;
+  dpr = v;
+  renderer.setPixelRatio(v);
+  composer.setPixelRatio(v);
+}
 function govern(dt){
   if(dt <= 0 || dt > .25) return;            // tab-hidden gap, ignore
+  // parked = scroll velocity ~0 for ~0.75s straight; a brief gap between scroll bursts
+  // can't fake it (the counter resets on any real motion), so climbs never hitch a scroll
+  const vel = (tl && tl.scrollTrigger) ? Math.abs(tl.scrollTrigger.getVelocity()) : 0;
+  stillFrames = vel < 20 ? stillFrames + 1 : 0;
   perf.acc += dt; perf.n++;
   if(perf.n < 90) return;
   const avg = perf.acc/perf.n;
   perf.acc = 0; perf.n = 0;
-  perf.bad = avg > .024 ? perf.bad+1 : 0;
+  perf.bad  = avg > .024 ? perf.bad+1  : 0;  // <~42fps
+  perf.good = avg < .017 ? perf.good+1 : 0;  // >~59fps
   if(perf.cool > 0){ perf.cool--; return; }
-  if(perf.bad >= 2 && dpr > DPR_MIN){
-    if(dpr === dynMax) dynMax = Math.max(DPR_MIN, dpr - .25);
-    setDpr(Math.max(DPR_MIN, dpr - .25)); perf.bad = 0; perf.cool = 2;
-  }else if(avg < .017 && dpr < dynMax){
-    setDpr(Math.min(dynMax, dpr + .25)); perf.cool = 4;
+  if(perf.bad >= 2 && dpr > DPR_FLOOR){
+    dynMax = Math.max(DPR_FLOOR, dpr - .25);          // ratchet the ceiling down — never re-climb into this wall
+    setDpr(dpr - .25); perf.bad = perf.good = 0; perf.cool = 2;
+  }else if(perf.good >= 2 && dpr < dynMax && stillFrames > 45){
+    setDpr(dpr + .25); perf.good = 0; perf.cool = 3;  // sharpen a step — only while parked
   }
 }
 
@@ -678,7 +742,8 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 /* debug handle (harmless in production) */
-window.__glow = {scene, camera, pucks, tl, get stackX(){return STACK_X}, get dpr(){return dpr}, camState};
+window.__glow = {scene, camera, pucks, tl, composer, bloom, renderer, setDpr,
+  get stackX(){return STACK_X}, get dpr(){return dpr}, get dynMax(){return dynMax}, camState};
 </script>
 </body>
 </html>
